@@ -386,15 +386,32 @@ def data_migrations_path
 end
 
 def run_migration(migration, direction)
+  Apartment::TaskHelper.warn_if_tenants_empty
+
   if migration[:kind] == :data
     ActiveRecord::Migration.write("== %s %s" % ['Data', "=" * 71])
-    DataMigrate::DataMigrator.run(direction, data_migrations_path, migration[:version])
+  end
+
+  run_migration_for_schema(migration, direction)
+
+  Apartment::TaskHelper.each_tenant do |tenant_name|
+    strategy = Apartment.db_migrate_tenant_missing_strategy
+    create_tenant(tenant_name) if strategy == :create_tenant
+
+    puts("Migrating #{tenant_name} tenant")
+
+    Apartment::Tenant.switch(tenant_name) do
+      run_migration_for_schema(migration, direction)
+    end
+  end
+end
+
+def run_migration_for_schema(migration, direction)
+  version = migration[:version]
+
+  if migration[:kind] == :data
+    DataMigrate::DataMigrator.run(direction, data_migrations_path, version)
   else
-    ActiveRecord::Migration.write("== %s %s" % ['Schema', "=" * 69])
-    DataMigrate::SchemaMigration.run(
-      direction,
-      DataMigrate::SchemaMigration.migrations_paths,
-      migration[:version]
-    )
+    ActiveRecord::Base.connection.migration_context.run(direction, version)
   end
 end
